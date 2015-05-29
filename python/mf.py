@@ -49,7 +49,6 @@ start=time.time()
 
 H=numpy.zeros(256)
 hist=numpy.zeros([256,cols]);
-
 for j in range(0,cols):
     hist[X[0,j],j]=r+2
 
@@ -60,11 +59,15 @@ for i in range(1,r):
         hist[tempVal,j]+=1
 #print sum(sum(hist))
 
+
+
 for i in range(0,rows):
     H=numpy.zeros(256);
+
     
     possub=max(0,i-r-1);
     posadd=min(rows-1,i+r);
+
     for j in range(0,cols):
         hist[X[possub,j],j]-=1
         hist[X[posadd,j],j]+=1
@@ -77,12 +80,13 @@ for i in range(0,rows):
         posadd=min(j+r,cols-1)
         addHistogram(H,hist,posadd,256)        
 #        Y[i,j]=hmedian(H,med_loc);
-#        subHistogram(H,hist,possub,256)
+        subHistogram(H,hist,possub,256)
 
         
 stop=time.time();
-
 print (stop-start)
+exit()
+
 result = Image.fromarray((Y*255).astype(numpy.uint8))
 result.save('out.bmp')
 
