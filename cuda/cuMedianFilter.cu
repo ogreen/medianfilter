@@ -32,7 +32,7 @@ typedef unsigned char im_type;
 #define MF_IM_SIZE 512
 #define MF_HIST_SIZE 256
 
-#include "../lookup.h"
+#include "lookup.h"
 
 
 #define CUDA(call, ...) do {                        \
@@ -438,8 +438,9 @@ __global__ void cuMedianFilter (im_type* src, im_type* dest, hist_type * hist, i
             histogramAdd(H, hist+posadd*MF_HIST_SIZE); syncthreads();
 //            histogramMedian(H,MF_HIST_SIZE,medPos, &retval);
 //            histogramMedianPar(H,Hscan,MF_HIST_SIZE,medPos, 8,&retval);
-            histogramMedianPar256(H,Hscan,MF_HIST_SIZE,medPos, 8,&retval);
+//            histogramMedianPar256(H,Hscan,MF_HIST_SIZE,medPos, 8,&retval);
 
+            histogramMedianPar32WorkInefficient(H,Hscan,MF_HIST_SIZE,medPos, 8,&retval);
 //            return;
             syncthreads();
 
@@ -465,7 +466,10 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     int32_t doExtraRow=blockIdx.x<extraRowThread;
     int32_t startRow=0, stopRow=0;
     int32_t rowsPerBlock= rows/gridDim.x+doExtraRow;
-    if(doExtraRow){
+
+    // The following code partitions the work to the blocks. Some blocks will do one row more
+	// than other blocks. This code is responsible for doing that balancing
+	if(doExtraRow){
         startRow=rowsPerBlock*blockIdx.x;
         stopRow=min(rows, startRow+rowsPerBlock);
     }
@@ -492,46 +496,48 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     }
    syncthreads();
 //   int counter=0;
-    if (initNeeded){
+    // In the original algorithm an initialization phase was required as part of the window was outside the
+	// image. In this parallel version, the initializtion is required for all thread blocks that part
+	// of the median filter is outside the window.
+	// For all threads in the block the same code will be executed.
+	if (initNeeded){
 		for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
 			hist[j*MF_HIST_SIZE+src[j]]=initVal;
 		}
 //		counter+=initVal;
     }
-
     syncthreads();
-    for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
+    
+	// Fot all remaining rows in the median filter, add the values to the the histogram
+	for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
 		for(int i=initStartRow; i<initStopRow; i++){
 			int32_t pos=min(i,rows-1);
 				hist[j*MF_HIST_SIZE+src[pos*cols+j]]++;
 			}
 	}
     
-/*    
-	for(int i=initStartRow; i<initStopRow; i++){
-		int32_t pos=min(i,rows-1);
-		    for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
-				hist[j*MF_HIST_SIZE+src[pos*cols+j]]++;
-		      }
-//			counter++;  
-	}
-*/    syncthreads();
+  syncthreads();
 //     if(threadIdx.x==0 && initNeeded)
 //      printf("%d, %d, %d, %d \n",blockIdx.x, startRow,stopRow, counter);
-    int32_t inc=blockDim.x*MF_HIST_SIZE;
+
+
+	 // Going through all the rows that the block is responsible for.
+	 int32_t inc=blockDim.x*MF_HIST_SIZE;
      for(int i=startRow; i< stopRow; i++){
-         histogramClear(H);
-         int32_t possub=max(0,i-r-1);
-         int32_t posadd=min(rows-1,i+r);
-	  int32_t possubMcols=possub*cols;
-	  int32_t posaddMcols=posadd*cols;
+         // For every new row that is started the global histogram for the entire window is restarted.
+		 histogramClear(H);
+		 // Computing some necessary indices
+         int32_t possub=max(0,i-r-1),posadd=min(rows-1,i+r);
+		 int32_t possubMcols=possub*cols, posaddMcols=posadd*cols;
          syncthreads();
          int32_t histPos=threadIdx.x*MF_HIST_SIZE;
+		 // Going through all the elements of a specific row. Foeach histogram, a value is taken out and 
+		 // one value is added.
          for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
-//          	hist[histPos+ src[possubMcols+j] ]--;
-//          	hist[histPos+ src[posaddMcols+j] ]++;
+          	hist[histPos+ src[possubMcols+j] ]--;
+          	hist[histPos+ src[posaddMcols+j] ]++;
           	histPos+=inc;
-	  syncthreads();
+			syncthreads();
          }
 
          
