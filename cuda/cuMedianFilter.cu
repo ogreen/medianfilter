@@ -31,6 +31,7 @@ typedef unsigned char im_type;
 
 #define MF_IM_SIZE 512
 #define MF_HIST_SIZE 256
+#define MF_COARSE_HIST_SIZE 32
 
 #include "lookup.h"
 
@@ -581,6 +582,7 @@ int main(const int argc, char *argv[])
 	hist_type* devHist;
 	int32_t memBytesHist=sizeof(hist_type)*cols*MF_HIST_SIZE;
 
+
 	cudaSetDevice(1);
 
 	// Allocating host and device memory.
@@ -597,7 +599,6 @@ int main(const int argc, char *argv[])
 
 	// Copying data from host to device.
 	CUDA(cudaMemcpy(devSrc,hostSrc,memBytesImage,cudaMemcpyHostToDevice));
-//	CUDA(cudaMemcpy(devDest,hostSrc,memBytesImage,cudaMemcpyHostToDevice));
 	CUDA(cudaMemset(devDest,0,memBytesImage));
 	CUDA(cudaMemset(devHist,0,memBytesHist));
 
@@ -608,7 +609,7 @@ int main(const int argc, char *argv[])
 
 	// Setting CUDA kernel properties.
 	dim3 gridDim; gridDim.x=1;
-	dim3 blockDim; blockDim.x=256;
+	dim3 blockDim; blockDim.x=32;
 
 	cudaEvent_t start,stop; float time;
 	cudaEventCreate(&start); cudaEventCreate(&stop);
@@ -638,10 +639,14 @@ int main(const int argc, char *argv[])
 		dim3 blockDim; blockDim.x=64;
 		hist_type* devHistMulti;
 		int32_t memBytesHistMulti=sizeof(hist_type)*cols*MF_HIST_SIZE*gridDim.x;
-		CUDA(cudaMalloc((void**)(&devHistMulti), memBytesHistMulti));
+		hist_type* devCoarseHistMulti;
+		int32_t memBytesCoarseHistMulti=sizeof(hist_type)*cols*MF_COARSE_HIST_SIZE*gridDim.x;
+ 		CUDA(cudaMalloc((void**)(&devHistMulti), memBytesHistMulti));
+		CUDA(cudaMalloc((void**)(&devCoarseHistMulti), memBytesCoarseHistMulti));
 		CUDA(cudaMemset(devDest,0,memBytesImage));
 		CUDA(cudaMemset(devHistMulti,0,memBytesHistMulti));
-
+		CUDA(cudaMemset(devCoarseHistMulti,0,memBytesCoarseHistMulti));
+		
 		cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 		
 		cudaEvent_t start,stop; float multiTime;
@@ -654,6 +659,7 @@ int main(const int argc, char *argv[])
 		cudaEventElapsedTime(&multiTime, start, stop);
 
 		cudaFree(devHistMulti);
+		cudaFree(devCoarseHistMulti);
 
 		// Copying filtered image back from the device to the host.
 		CUDA(cudaMemcpy(hostDest,devDest,memBytesImage,cudaMemcpyDeviceToHost));
