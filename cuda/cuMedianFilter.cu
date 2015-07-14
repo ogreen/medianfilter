@@ -31,7 +31,7 @@ typedef unsigned char im_type;
 
 #define MF_IM_SIZE 512
 #define MF_HIST_SIZE 256
-#define MF_COARSE_HIST_SIZE 32
+#define MF_COARSE_HIST_SIZE 8
 
 #include "lookup.h"
 
@@ -105,7 +105,7 @@ __device__ void histogramClearAllColmuns(hist_type* hist, const int32_t columns,
 
 
 
-_device__ void histogramMedianPar32WorkInefficient(hist_type* H,hist_type* Hscan,const int32_t size, const int32_t medPos, const int logSize,im_type* retval){
+__device__ void histogramMedianPar32WorkInefficient(hist_type* H,hist_type* Hscan,const int32_t size, const int32_t medPos, const int logSize,im_type* retval){
 	int32_t tx=threadIdx.x;
 	*retval=0;
 	__shared__ int32_t foundIn;
@@ -259,7 +259,7 @@ __global__ void cuMedianFilter (im_type* src, im_type* dest, hist_type * hist, i
 }
 
 
-__global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos)
+__global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid, int32_t* LUC)
 {
     __shared__ hist_type H[MF_HIST_SIZE];
     __shared__ hist_type Hscan[32];
@@ -269,6 +269,8 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     int32_t doExtraRow=blockIdx.x<extraRowThread;
     int32_t startRow=0, stopRow=0;
     int32_t rowsPerBlock= rows/gridDim.x+doExtraRow;
+//	hist_type* coarseHistGrid
+	int32_t* localLUC=LUC+blockId.x*cols;
 
     // The following code partitions the work to the blocks. Some blocks will do one row more
 	// than other blocks. This code is responsible for doing that balancing
@@ -282,6 +284,8 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     }
 
     hist_type* hist=histPar+cols*MF_HIST_SIZE*blockIdx.x;
+	hist_type* histCoarse=coarseHistGrid +cols*MF_COARSE_HIST_SIZE*blockIdx.x;
+   
     if (blockIdx.x==(gridDim.x-1))
     	stopRow=rows;
     syncthreads();
@@ -311,6 +315,8 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     }
     syncthreads();
     
+
+
 	// Fot all remaining rows in the median filter, add the values to the the histogram
 	for (int32_t j=threadIdx.x; j<cols; j+=blockDim.x){
 		for(int i=initStartRow; i<initStopRow; i++){
@@ -445,24 +451,29 @@ int main(const int argc, char *argv[])
 		int32_t memBytesCoarseHistMulti=sizeof(hist_type)*cols*MF_COARSE_HIST_SIZE*gridDim.x;
  		CUDA(cudaMalloc((void**)(&devHistMulti), memBytesHistMulti));
 		CUDA(cudaMalloc((void**)(&devCoarseHistMulti), memBytesCoarseHistMulti));
+        int32_t* devLUC;
+		int32_t memBytesLUC= sizeof(int32_t)*MF_IM_SIZE*gridDim.x;
+	    CUDA(cudaMalloc((void**)(&devLUC),memBytesLUC)) ;
+				
 		CUDA(cudaMemset(devDest,0,memBytesImage));
 		CUDA(cudaMemset(devHistMulti,0,memBytesHistMulti));
 		CUDA(cudaMemset(devCoarseHistMulti,0,memBytesCoarseHistMulti));
-		
+
+		CUDA(cudaMemset(devLUC,0,memBytesLUC));
 		cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 		
 		cudaEvent_t start,stop; float multiTime;
 		cudaEventCreate(&start); cudaEventCreate(&stop);
 		cudaEventRecord(start,0);
-		cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos);
+		cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti,devLUC);
 		cudaEventRecord(stop,0);
 		cudaEventSynchronize(stop);
 		cudaThreadSynchronize();
 		cudaEventElapsedTime(&multiTime, start, stop);
 
-		cudaFree(devHistMulti);
+		cudaFree(devLUC);
 		cudaFree(devCoarseHistMulti);
-
+		cudaFree(devHistMulti);
 		// Copying filtered image back from the device to the host.
 		CUDA(cudaMemcpy(hostDest,devDest,memBytesImage,cudaMemcpyDeviceToHost));
 
