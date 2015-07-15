@@ -435,6 +435,6 @@ __device__ void histogramMedianPar32Multi(hist_type* H,hist_type* Hscan,const in
 */	
 }
 
-_
+
 
 
