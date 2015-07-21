@@ -27,6 +27,12 @@ __device__ void histogramMultipleAdd(hist_type* H, const hist_type * hist_col,in
 	}
 }
 
+__device__ void histogramClear(hist_type* H){
+	int32_t tx = threadIdx.x;
+	for(; tx<256;tx+=blockDim.x){
+		H[tx]=0;
+	}
+}
 
 
 __device__ void histogramAdd16(hist_type* H, const hist_type * hist_col){
@@ -52,7 +58,15 @@ __device__ void histogramMultipleAdd16(hist_type* H, const hist_type * hist_col,
 	for(; tx<16;tx+=blockDim.x){
 		hist_type temp=H[tx];
 		for(int i=0; i<histCount; i++)
-		    temp+=hist_col[(i<<8)+tx];
+		    temp+=hist_col[(i<<4)+tx];
 		H[tx]=temp;
+	}
+}
+
+
+__device__ void histogramClear16(hist_type* H){
+	int32_t tx = threadIdx.x;
+	for(; tx<16;tx+=blockDim.x){
+		H[tx]=0;
 	}
 }
