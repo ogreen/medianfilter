@@ -57,9 +57,9 @@ typedef unsigned char im_type;
 
 
 
-__device__ void lucClear(int32_t* luc){
+__device__ void lucClear16(int32_t* luc){
 	int32_t tx = threadIdx.x;
-	for(; tx<MF_IM_SIZE;tx+=blockDim.x){
+	for(; tx<16;tx+=blockDim.x){
 		luc[tx]=0;
 	}
 }
@@ -286,7 +286,7 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
     int32_t doExtraRow=blockIdx.x<extraRowThread;
     int32_t startRow=0, stopRow=0;
     int32_t rowsPerBlock= rows/gridDim.x+doExtraRow;
-	int32_t* localLUC=LUC+blockIdx.x*cols;
+//	int32_t* localLUC=LUC+blockIdx.x*cols;
 
     // The following code partitions the work to the blocks. Some blocks will do one row more
 	// than other blocks. This code is responsible for doing that balancing
@@ -354,7 +354,6 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
      for(int i=startRow; i< stopRow; i++){
          // For every new row that is started the global histogram for the entire window is restarted.
 		 histogramClear(H);
-		 lucClear(localLUC);
 		 // Computing some necessary indices
          int32_t possub=max(0,i-r-1),posadd=min(rows-1,i+r);
 		 int32_t possubMcols=possub*cols, posaddMcols=posadd*cols;
@@ -405,15 +404,18 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
 
 __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid, int32_t* LUC)
 {
-    __shared__ hist_type H[MF_HIST_SIZE];
+//    __shared__ hist_type H[MF_HIST_SIZE];
 //    __shared__ hist_type Hscan[32];
 
 	__shared__ hist_type HCoarse[32];
     __shared__ hist_type HCoarseScan[32];
+	__shared__ hist_type HFine[16][16];
+
 	
 	// THIS VARIABLE SHOULD BE DELETED IN THE FINAL VERSION.
 	__shared__ hist_type H_IMPL_TEMP[32]; // This variable is only being used for the implementation.
-    __shared__ hist_type HCoarseScan222[32];
+//    __shared__ hist_type HCoarseScan222[32];
+	__shared__ int32_t luc[16];
 	
     __shared__ int32_t firstBin,countAtMed, retval;
 
@@ -421,7 +423,7 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
     int32_t doExtraRow=blockIdx.x<extraRowThread;
     int32_t startRow=0, stopRow=0;
     int32_t rowsPerBlock= rows/gridDim.x+doExtraRow;
-	int32_t* localLUC=LUC+blockIdx.x*cols;
+//	int32_t* localLUC=LUC+blockIdx.x*cols;
 
     // The following code partitions the work to the blocks. Some blocks will do one row more
 	// than other blocks. This code is responsible for doing that balancing
@@ -487,10 +489,9 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
 	 int32_t incCoarse=blockDim.x*MF_COARSE_HIST_SIZE;	 
      for(int i=startRow; i< stopRow; i++){
          // For every new row that is started the global histogram for the entire window is restarted.
-		 histogramClear(H);
+//		 histogramClear(H);
 		 histogramClear16(HCoarse);
-		 
-		 lucClear(localLUC);
+		 lucClear16(luc);
 		 // Computing some necessary indices
          int32_t possub=max(0,i-r-1),posadd=min(rows-1,i+r);
 		 int32_t possubMcols=possub*cols, posaddMcols=posadd*cols;
@@ -510,7 +511,7 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
          }
 
          
-         histogramMultipleAdd(H,hist, 2*r+1);         
+ //        histogramMultipleAdd(H,hist, 2*r+1);         
          histogramMultipleAdd16(HCoarse,histCoarse, 2*r+1);         
 
          syncthreads();         	
@@ -522,14 +523,42 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
 			 			 
             histogramMedianPar16LookupOnly(HCoarse,HCoarseScan,medPos, &firstBin,&countAtMed);
 			syncthreads();	
+					
+			if ( luc[firstBin] <= j-r )
+//			if(1)
+			{
+				histogramClear16(HFine[firstBin]);
+
+				for ( luc[firstBin] = (j-r); luc[firstBin] < min(j+r+1,cols_m_1); luc[firstBin]++ )
+					histogramAdd16(HFine[firstBin], hist+(luc[firstBin]*MF_HIST_SIZE+(firstBin<<4) ) );
+//					histogram_add( &h_fine[16*(n*(16*c+k)+luc[c][k])], H[c].fine[k] );
+
+				// if ( luc[c][k] < j+r+1 )
+				// {
+					// histogram_muladd( j+r+1 - n, &h_fine[16*(n*(16*c+k)+(n-1))], &H[c].fine[k][0] );
+					// luc[c][k] = (HT)(j+r+1);
+				// }
+			}
+			else{
+				for ( ; luc[firstBin] < (j+r+1);luc[firstBin]++ )
+				{
+					histogramAdd16(HFine[firstBin], hist+(min(luc[firstBin],cols_m_1)*MF_HIST_SIZE+(firstBin<<4) ) );
+					histogramSub16(HFine[firstBin], hist+(max(luc[firstBin]-2*r-1,0)*MF_HIST_SIZE+(firstBin<<4) ) );
+					
+//					histogram_add( &h_fine[16*(n*(16*c+k)+MIN(luc[c][k],n-1))], H[c].fine[k] );
+//					histogram_sub( &h_fine[16*(n*(16*c+k)+MAX(luc[c][k]-2*r-1,0))], H[c].fine[k] );
+				}
+			}			
 			
-			if(threadIdx.x<16)
-				H_IMPL_TEMP[threadIdx.x]=H[(firstBin<<4)+threadIdx.x];
-			int32_t leftOver=medPos-countAtMed;
+			if(threadIdx.x<16){
+//				H_IMPL_TEMP[threadIdx.x]=H[(firstBin<<4)+threadIdx.x];
+				H_IMPL_TEMP[threadIdx.x]=HFine[firstBin][threadIdx.x];
+			}int32_t leftOver=medPos-countAtMed;
 			syncthreads();
+			
 		
 			if(leftOver>0)
-				histogramMedianPar16LookupOnly(H_IMPL_TEMP,HCoarseScan222,leftOver,&retval,&countAtMed);
+				histogramMedianPar16LookupOnly(H_IMPL_TEMP,HCoarseScan,leftOver,&retval,&countAtMed);
 			else retval=0;
 			syncthreads();
 
@@ -539,7 +568,7 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
 
 //			firstIter++;
 						    
-             histogramAddAndSub(H, hist+(int)(posadd<<8),hist+(int)(possub<<8));                 
+  //           histogramAddAndSub(H, hist+(int)(posadd<<8),hist+(int)(possub<<8));                 
 			 histogramAddAndSub16(HCoarse, histCoarse+(int)(posadd<<4),histCoarse+(int)(possub<<4));                 
 
              syncthreads();
