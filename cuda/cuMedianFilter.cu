@@ -107,13 +107,7 @@ __device__ void histogramMedianPar32WorkInefficient(hist_type* H,hist_type* Hsca
 		}
  
 	}
-/*	       		if(blockIdx.x==0 && threadIdx.x==0){
-				for(int i=0; i<32; i++)
-					printf("%d ", Hscan[i]);
-		//		printf("      -  %d \n",Hscan[i]);
-		        	printf("\n");
-			}
-*/       
+
 		syncthreads();
 		if(tx<31){
 			if(Hscan[tx+1]>=medPos){
@@ -123,27 +117,14 @@ __device__ void histogramMedianPar32WorkInefficient(hist_type* H,hist_type* Hsca
 			}
 		}	
 		syncthreads();
-/*       	                         			if(blockIdx.x==0 && threadIdx.x==0){
-				printf("%d  %d  %d %d \n",Hscan[foundIn], Hscan[foundIn+1], foundIn,medPos);
-			      
-				int start=max(0,(foundIn-1)<<3);
-				int stop=min(256, (foundIn+2)<<3);
-				printf("%d %d\n", start,stop);
-				for(int i=start; i<stop;i++)
-				  printf ("%d ",H[i]);
-			      printf("\n"); 			
-			      }
-*/
+
 		syncthreads();
 		if(tx==0){
 			int32_t total=Hscan[foundIn];
 			int32_t pos=(foundIn+1)<<3;
 		        total+=H[pos];     
 			
-/*			if(blockIdx.x==0 && threadIdx.x==0){
-				printf(" %d \n",total );
-			} 
-*/			*retval=pos+8;
+			*retval=pos+8;
 			for(int i=0; i<8;i++)
 			{
 				if(total>=medPos){
@@ -151,10 +132,7 @@ __device__ void histogramMedianPar32WorkInefficient(hist_type* H,hist_type* Hsca
 					break;
 				}
 				total+=H[pos+i];
-/* 			if(blockIdx.x==0 && threadIdx.x==0){
-				printf(" %d \n",total );
-			}                            
-*/        		}
+       		}
        		
 		}
 //	}
@@ -170,53 +148,26 @@ __device__ void histogramMedianPar16LookupOnly(hist_type* H,hist_type* Hscan, co
 	if(tx<16){
 		Hscan[tx]=H[tx];
 	}
-//	syncthreads();
-
-	if(tx>1 && tx<16){
-	  Hscan[tx]+=Hscan[tx-1];
+	if(tx<16){
+		if(tx>=1 )
+		  Hscan[tx]+=Hscan[tx-1];
+		if(tx>=2)
+		  Hscan[tx]+=Hscan[tx-2];
+		if(tx>=4)
+		  Hscan[tx]+=Hscan[tx-4];
+		if(tx>=8)
+		  Hscan[tx]+=Hscan[tx-8];
 	}
-//	syncthreads();
-	if(tx>=2 && tx <16){
-	  Hscan[tx]+=Hscan[tx-2];
-	}
-//	syncthreads();
-	if(tx>=4 && tx<16){
-	  Hscan[tx]+=Hscan[tx-4];
-	}
-//	syncthreads();
-	
-	if(tx>=8 && tx<16){
-	  Hscan[tx]+=Hscan[tx-8];
-	}
-//	syncthreads();
-
 	syncthreads();
 	if(tx<15){
 		if(Hscan[tx+1]>=medPos && Hscan[tx]<medPos){ 
 			foundIn=tx;
 			if(foundIn==0&&Hscan[0]>medPos)
-				foundIn--;
+				foundIn--;			
 			*retval=foundIn+1;
 			*countAtMed=Hscan[foundIn];
 		}
 	}	
- 
-	// if(tx<15){
-		// if(Hscan[tx+1]>=medPos){
-			// if(Hscan[tx]<medPos){ 
-				// foundIn=tx;
-			// }
-		// }
-	// }	
-	// syncthreads();	
-	// if(tx==0){
-		// if(foundIn==0 && Hscan[0]>medPos)
-			// foundIn--;
-		// *retval=foundIn+1;		
-		// *countAtMed=Hscan[foundIn];
-	// }
-
-
  }
 
 
@@ -286,7 +237,7 @@ __global__ void cuMedianFilter (im_type* src, im_type* dest, hist_type * hist, i
 }
 
 
-__global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid, int32_t* LUC)
+__global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid)
 {
     __shared__ hist_type H[MF_HIST_SIZE];
     __shared__ hist_type Hscan[32];
@@ -412,19 +363,12 @@ __global__ void cuMedianFilterMultiBlock (im_type* src, im_type* dest, hist_type
 }
 
 
-__global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid, int32_t* LUC)
+__global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_type * histPar, int32_t rows, int32_t cols, int32_t r, int32_t medPos, hist_type* coarseHistGrid)
 {
-//    __shared__ hist_type H[MF_HIST_SIZE];
-//    __shared__ hist_type Hscan[32];
-
 	__shared__ hist_type HCoarse[32];
     __shared__ hist_type HCoarseScan[32];
 	__shared__ hist_type HFine[16][16];
 
-	
-	// THIS VARIABLE SHOULD BE DELETED IN THE FINAL VERSION.
-//	__shared__ hist_type H_IMPL_TEMP[32]; // This variable is only being used for the implementation.
-//    __shared__ hist_type HCoarseScan222[32];
 	__shared__ int32_t luc[16];
 	
     __shared__ int32_t firstBin,countAtMed, retval;
@@ -433,7 +377,7 @@ __global__ void cuMedianFilterMultiBlock16(im_type* src, im_type* dest, hist_typ
     int32_t doExtraRow=blockIdx.x<extraRowThread;
     int32_t startRow=0, stopRow=0;
     int32_t rowsPerBlock= rows/gridDim.x+doExtraRow;
-//	int32_t* localLUC=LUC+blockIdx.x*cols;
+
 
     // The following code partitions the work to the blocks. Some blocks will do one row more
 	// than other blocks. This code is responsible for doing that balancing
@@ -617,7 +561,7 @@ int main(const int argc, char *argv[])
 	CUDA(cudaMemset(devHist,0,memBytesHist));
 
 
-	int32_t kernel=19;
+	int32_t kernel=5;
 	int32_t r=(kernel-1)/2;
 	int32_t medPos=2*r*r+2*r;
 
@@ -657,43 +601,35 @@ int main(const int argc, char *argv[])
 		int32_t memBytesCoarseHistMulti=sizeof(hist_type)*cols*MF_COARSE_HIST_SIZE*gridDim.x;
  		CUDA(cudaMalloc((void**)(&devHistMulti), memBytesHistMulti));
 		CUDA(cudaMalloc((void**)(&devCoarseHistMulti), memBytesCoarseHistMulti));
-        int32_t* devLUC;
-		int32_t memBytesLUC= sizeof(int32_t)*MF_IM_SIZE*gridDim.x;
-	    CUDA(cudaMalloc((void**)(&devLUC),memBytesLUC)) ;
-				
+     			
 				
 		CUDA(cudaMemset(devDest,0,memBytesImage));
 		CUDA(cudaMemset(devHistMulti,0,memBytesHistMulti));
 		CUDA(cudaMemset(devCoarseHistMulti,0,memBytesCoarseHistMulti));
 
-		CUDA(cudaMemset(devLUC,0,memBytesLUC));
 		cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 		
-		cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti,devLUC);				
+		cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti);				
 				
 				
 		CUDA(cudaMemset(devDest,0,memBytesImage));
 		CUDA(cudaMemset(devHistMulti,0,memBytesHistMulti));
 		CUDA(cudaMemset(devCoarseHistMulti,0,memBytesCoarseHistMulti));
 
-		CUDA(cudaMemset(devLUC,0,memBytesLUC));
-		cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
+
 		
 		cudaEvent_t start,stop; float multiTime;
 		cudaEventCreate(&start); cudaEventCreate(&stop);
 		cudaEventRecord(start,0);
-		//cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti,devLUC);
-		cuMedianFilterMultiBlock16<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti,devLUC);
+		//cuMedianFilterMultiBlock<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti);
+		cuMedianFilterMultiBlock16<<<gridDim,blockDim>>>(devSrc, devDest, devHistMulti, rows, cols, r, medPos, devCoarseHistMulti);
 
 		cudaEventRecord(stop,0);
 		cudaEventSynchronize(stop);
 		cudaThreadSynchronize();
 		cudaEventElapsedTime(&multiTime, start, stop);
 
-		
-		
-		
-		cudaFree(devLUC);
+
 		cudaFree(devCoarseHistMulti);
 		cudaFree(devHistMulti);
 		// Copying filtered image back from the device to the host.
