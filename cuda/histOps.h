@@ -95,7 +95,7 @@ __device__ void histogramMultipleAdd8(hist_type* H, const hist_type * hist_col,i
 	if (tx<8){
 		hist_type temp=H[tx];
 		for(int i=0; i<histCount; i++)
-		    temp+=hist_col[(i<<4)+tx];
+		    temp+=hist_col[(i<<3)+tx];
 		H[tx]=temp;
 	}
 }
@@ -131,7 +131,7 @@ __device__ void histogramMultipleAdd32(hist_type* H, const hist_type * hist_col,
 	if (tx<32){
 		hist_type temp=H[tx];
 		for(int i=0; i<histCount; i++)
-		    temp+=hist_col[(i<<4)+tx];
+		    temp+=hist_col[(i<<5)+tx];
 		H[tx]=temp;
 	}
 }
